@@ -2,8 +2,9 @@
 using System.Collections.Specialized;
 using System.Web.Caching;
 using Common.Logging;
-using Couchbase.Core;
-using Couchbase.IO;
+using Couchbase.AspNet.IO;
+using Couchbase.AspNet.Utils;
+using Couchbase.Core.IO.Transcoders;
 
 namespace Couchbase.AspNet.Caching
 {
@@ -21,6 +22,8 @@ namespace Couchbase.AspNet.Caching
         public bool ThrowOnError { get; set; }
         public string Prefix { get; set; }
         public string BucketName { get; set; }
+
+        private readonly ITypeTranscoder _transcoder = new LegacyTranscoder();
 
         public CouchbaseOutputCacheProvider(){ }
 
@@ -56,7 +59,7 @@ namespace Couchbase.AspNet.Caching
             try
             {
                 // get the item
-                var result = Bucket.Get<object>(key);
+                var result = Bucket.Get<object>(key, _transcoder);
                 if (result.Success)
                 {
                     return result.Value;
@@ -98,7 +101,7 @@ namespace Couchbase.AspNet.Caching
              try
              {
                  //return the value if the key exists
-                 var exists = Bucket.Get<object>(key);
+                 var exists = Bucket.Get<object>(key, _transcoder);
                  if (exists.Success)
                  {
                      return exists.Value;
@@ -107,7 +110,7 @@ namespace Couchbase.AspNet.Caching
                  var expiration = utcExpiry - DateTime.Now.ToUniversalTime();
 
                  //no key so add the value and return it.
-                 var result = Bucket.Insert(key, entry, expiration);
+                 var result = Bucket.Insert(key, entry, expiration, _transcoder);
                  if (result.Success)
                  {
                      return entry;
@@ -138,7 +141,7 @@ namespace Couchbase.AspNet.Caching
             {
                 var expiration = utcExpiry - DateTime.Now.ToUniversalTime();
 
-                var result = Bucket.Upsert(key, entry, expiration);
+                var result = Bucket.Upsert(key, entry, expiration, _transcoder);
                 if (result.Success) return;
                 LogAndOrThrow(result, key);
             }

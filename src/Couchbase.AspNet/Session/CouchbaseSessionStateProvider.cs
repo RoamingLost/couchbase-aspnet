@@ -2,13 +2,13 @@
 using System.Collections.Specialized;
 using System.IO;
 using System.Web;
+using System.Web.Configuration;
 using System.Web.SessionState;
 using Common.Logging;
-using Couchbase.Core;
-using System.Web.Configuration;
-using Couchbase.AspNet.Caching;
-using Couchbase.IO;
-using Couchbase.Utils;
+using Couchbase.AspNet.IO;
+using Couchbase.AspNet.Utils;
+using Couchbase.Core.IO.Transcoders;
+using Couchbase.KeyValue;
 
 namespace Couchbase.AspNet.Session
 {
@@ -24,6 +24,8 @@ namespace Couchbase.AspNet.Session
         public string BucketName { get; set; }
         public int? TimeOut { get; set; }
         private SessionStateSection Config { get; set; }
+
+        private readonly ITypeTranscoder _transcoder = new LegacyTranscoder();
 
         public override void Initialize(string name, NameValueCollection config)
         {
@@ -113,7 +115,7 @@ namespace Couchbase.AspNet.Session
              * false and returns null. This causes SessionStateModule to call the CreateNewStoreData method to create a new
              * SessionStateStoreData object for the request.
              */
-            var sessionData = Bucket.Get<SessionStateItem>(id);
+            var sessionData = Bucket.Get<SessionStateItem>(id, _transcoder);
             if (sessionData.Status == ResponseStatus.KeyNotFound)
             {
                 lockAge = TimeSpan.Zero;
@@ -163,7 +165,7 @@ namespace Couchbase.AspNet.Session
 
                 if (!lockRecord) return item;
 
-                var upsert = Bucket.Upsert(id, sessionData.Value, Config.Timeout);
+                var upsert = Bucket.Upsert(id, sessionData.Value, Config.Timeout, _transcoder);
                 if (!upsert.Success)
                 {
                     LogAndOrThrow(upsert, id);
@@ -204,7 +206,7 @@ namespace Couchbase.AspNet.Session
             CheckKey(ref id);
             _log.TraceFormat("ReleaseItemExclusive called for item {0} with lockId {1}.", id, lockId);
 
-            var original = Bucket.Get<SessionStateItem>(id);
+            var original = Bucket.Get<SessionStateItem>(id ,_transcoder);
             var item = original.Value;
             if (original.Success && item.LockId != (uint)lockId)
             {
@@ -217,7 +219,7 @@ namespace Couchbase.AspNet.Session
             item.ApplicationName = ApplicationName;
             item.LockId = (uint)lockId;
 
-            var upsert = Bucket.Upsert(id, item, Config.Timeout);
+            var upsert = Bucket.Upsert(id, item, Config.Timeout, _transcoder);
             if (!upsert.Success)
             {
                 LogAndOrThrow(upsert, id);
@@ -242,7 +244,7 @@ namespace Couchbase.AspNet.Session
             CheckKey(ref id);
             _log.Trace("SetAndReleaseItemExclusive called.");
 
-            var original = Bucket.Get<SessionStateItem>(id);
+            var original = Bucket.Get<SessionStateItem>(id, _transcoder);
             if (original.Success && original.Value.LockId != (uint)lockId)
             {
                 return;
@@ -259,7 +261,7 @@ namespace Couchbase.AspNet.Session
                     SessionItems = Serialize(item.Items),
                     Locked = false,
                     Timeout = Config.Timeout
-                }, Config.Timeout);
+                }, Config.Timeout, _transcoder);
 
                 if (!result.Success)
                 {
@@ -277,13 +279,7 @@ namespace Couchbase.AspNet.Session
                 entry.LockId = (uint)lockId;
                 entry.Actions = SessionStateActions.None;
 
-                var updated = Bucket.Upsert(new Document<SessionStateItem>
-                {
-                    Content = entry,
-                    Id = id,
-                    Expiry = (uint)Config.Timeout.TotalMilliseconds
-                });
-
+                var updated = Bucket.Upsert(id, entry, Config.Timeout, _transcoder);
                 if (!updated.Success)
                 {
                     LogAndOrThrow(updated, id);
@@ -315,7 +311,7 @@ namespace Couchbase.AspNet.Session
             CheckKey(ref id);
             _log.TraceFormat("Remove called for item {0} with lockId {1}.", id, lockId);
 
-            var result = Bucket.Get<SessionStateItem>(id);
+            var result = Bucket.Get<SessionStateItem>(id, _transcoder);
             if (result.Success)
             {
                 var entry = result.Value;
@@ -337,7 +333,7 @@ namespace Couchbase.AspNet.Session
             CheckKey(ref id);
             _log.TraceFormat("ResetItemTimeout called for item {0}.", id);
 
-            var result = Bucket.Get<SessionStateItem>(id);
+            var result = Bucket.Get<SessionStateItem>(id, _transcoder);
             if (result.Success)
             {
                 var item = result.Value;
@@ -345,7 +341,7 @@ namespace Couchbase.AspNet.Session
                 item.SessionId = id;
                 item.ApplicationName = ApplicationName;
 
-                var updated = Bucket.Upsert(id, item, Config.Timeout);
+                var updated = Bucket.Upsert(id, item, Config.Timeout, _transcoder);
                 if (updated.Success) return;
                 LogAndOrThrow(updated, id);
             }
@@ -401,7 +397,7 @@ namespace Couchbase.AspNet.Session
                     Expires = expires,
                     SessionId = id,
                     Actions = SessionStateActions.InitializeItem
-                }, TimeSpan.FromMinutes(timeout));
+                }, TimeSpan.FromMinutes(timeout), _transcoder);
 
                 if (result.Success) return;
                 LogAndOrThrow(result, id);
@@ -436,27 +432,6 @@ namespace Couchbase.AspNet.Session
         /// <param name="key">The key.</param>
         /// <exception cref="InvalidOperationException"></exception>
         private void LogAndOrThrow(IOperationResult result, string key)
-        {
-            if (result.Exception != null)
-            {
-                LogAndOrThrow(result.Exception, key);
-                return;
-            }
-            _log.Error($"Could not retrieve, remove or write key '{key}' - reason: {result.Status}");
-            if (ThrowOnError)
-            {
-                throw new InvalidOperationException(result.Status.ToString());
-            }
-        }
-
-        /// <summary>
-        /// Logs the reason why an operation fails and throws and exception if <see cref="ThrowOnError"/> is
-        /// <c>true</c> and logging the issue as WARN.
-        /// </summary>
-        /// <param name="result">The result.</param>
-        /// <param name="key">The key.</param>
-        /// <exception cref="InvalidOperationException"></exception>
-        private void LogAndOrThrow(IDocumentResult result, string key)
         {
             if (result.Exception != null)
             {

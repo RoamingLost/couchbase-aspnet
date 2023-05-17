@@ -1,9 +1,9 @@
 ﻿using System;
 using System.Threading;
 using System.Web;
+using Couchbase.AspNet.IO;
 using Couchbase.AspNet.Session;
 using Couchbase.Core;
-using Couchbase.IO;
 using Moq;
 using Xunit;
 

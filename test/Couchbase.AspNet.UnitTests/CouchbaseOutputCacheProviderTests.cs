@@ -1,9 +1,13 @@
 ﻿using System;
+using System.Threading.Tasks;
 using System.Web;
 using Couchbase.AspNet.Caching;
+using Couchbase.AspNet.IO;
+using Couchbase.AspNet.Utils;
 using Couchbase.Core;
-using Couchbase.IO;
-using Couchbase.IO.Operations;
+using Couchbase.Core.Exceptions.KeyValue;
+using Couchbase.Core.IO.Transcoders;
+using Couchbase.KeyValue;
 using Moq;
 using Xunit;
 
@@ -23,8 +27,11 @@ namespace Couchbase.AspNet.UnitTests
         public void Get_When_Key_IsNullEmptyOrSpace_DoNot_Throw_ArgumentException_If_ThrowOnError(string key,
             bool throwOnError)
         {
+            var collection = new Mock<ICouchbaseCollection>();
+            collection.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<GetOptions>())).Throws<MissingKeyException>();
+
             var bucket = new Mock<IBucket>();
-            bucket.Setup(x => x.Get<dynamic>(It.IsAny<string>())).Throws<MissingKeyException>();
+            bucket.Setup(x => x.DefaultCollection()).Returns(collection.Object);
 
             var provider = new CouchbaseOutputCacheProvider(bucket.Object)
             {
@@ -45,12 +52,11 @@ namespace Couchbase.AspNet.UnitTests
         [InlineData(true)]
         public void Get_When_Key_DoesNotExist_Return_Null(bool throwOnError)
         {
-            var result = new Mock<IOperationResult<dynamic>>();
-            result.Setup(x => x.Success).Returns(false);
-            result.Setup(x => x.Status).Returns(ResponseStatus.KeyNotFound);
+            var collection = new Mock<ICouchbaseCollection>();
+            collection.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<GetOptions>())).Throws(new DocumentNotFoundException());
 
             var bucket = new Mock<IBucket>();
-            bucket.Setup(x => x.Get<dynamic>(It.IsAny<string>())).Returns(result.Object);
+            bucket.Setup(x => x.DefaultCollection()).Returns(collection.Object);
 
             var provider = new CouchbaseOutputCacheProvider(bucket.Object) {ThrowOnError = throwOnError};
             Assert.Null(provider.Get("thekey"));
@@ -59,13 +65,11 @@ namespace Couchbase.AspNet.UnitTests
         [Fact]
         public void Get_When_Operation_Causes_Exception_Throw_Exception()
         {
-            var result = new Mock<IOperationResult<dynamic>>();
-            result.Setup(x => x.Success).Returns(false);
-            result.Setup(x => x.Status).Returns(ResponseStatus.ClientFailure);
-            result.Setup(x => x.Exception).Returns(new CouchbaseOutputCacheException());
+            var collection = new Mock<ICouchbaseCollection>();
+            collection.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<GetOptions>())).Throws(new CouchbaseOutputCacheException());
 
             var bucket = new Mock<IBucket>();
-            bucket.Setup(x => x.Get<dynamic>(It.IsAny<string>())).Returns(result.Object);
+            bucket.Setup(x => x.DefaultCollection()).Returns(collection.Object);
 
             var provider = new CouchbaseOutputCacheProvider(bucket.Object) {ThrowOnError = true};
             Assert.Throws<CouchbaseOutputCacheException>(() => provider.Get("thekey"));
@@ -74,12 +78,11 @@ namespace Couchbase.AspNet.UnitTests
         [Fact]
         public void Get_When_Operation_Causes_Exception_Throw_CouchbaseCacheException()
         {
-            var result = new Mock<IOperationResult<dynamic>>();
-            result.Setup(x => x.Success).Returns(false);
-            result.Setup(x => x.Status).Returns(ResponseStatus.OutOfMemory);
+            var collection = new Mock<ICouchbaseCollection>();
+            collection.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<GetOptions>())).Throws(new OutOfMemoryException());
 
             var bucket = new Mock<IBucket>();
-            bucket.Setup(x => x.Get<dynamic>(It.IsAny<string>())).Returns(result.Object);
+            bucket.Setup(x => x.DefaultCollection()).Returns(collection.Object);
 
             var provider = new CouchbaseOutputCacheProvider(bucket.Object) {ThrowOnError = true};
             Assert.Throws<CouchbaseOutputCacheException>(() => provider.Get("thekey"));
@@ -109,14 +112,11 @@ namespace Couchbase.AspNet.UnitTests
         [Fact]
         public void Set_When_Operation_Causes_Exception_Throw_CouchbaseCacheException()
         {
-            var result = new Mock<IOperationResult<object>>();
-            result.Setup(x => x.Success).Returns(false);
-            result.Setup(x => x.Status).Returns(ResponseStatus.OperationTimeout);
-            result.Setup(x => x.Exception).Returns(new TimeoutException());
+            var collection = new Mock<ICouchbaseCollection>();
+            collection.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<GetOptions>())).Throws(new Core.Exceptions.TimeoutException());
 
             var bucket = new Mock<IBucket>();
-            bucket.Setup(x => x.Upsert(It.IsAny<string>(), It.IsAny<object>(), It.IsAny<TimeSpan>()))
-                .Returns(result.Object);
+            bucket.Setup(x => x.DefaultCollection()).Returns(collection.Object);
 
             var provider = new CouchbaseOutputCacheProvider(bucket.Object) {ThrowOnError = true};
             Assert.Throws<CouchbaseOutputCacheException>(() => provider.Set("thekey", new object(), DateTime.Now));
@@ -125,12 +125,11 @@ namespace Couchbase.AspNet.UnitTests
         [Fact]
         public void Set_When_Operation_Fails_Throw_CouchbaseCacheException()
         {
-            var result = new Mock<IOperationResult<dynamic>>();
-            result.Setup(x => x.Success).Returns(false);
-            result.Setup(x => x.Status).Returns(ResponseStatus.OutOfMemory);
+            var collection = new Mock<ICouchbaseCollection>();
+            collection.Setup(x => x.UpsertAsync<dynamic>(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<UpsertOptions>())).Throws(new OutOfMemoryException());
 
             var bucket = new Mock<IBucket>();
-            bucket.Setup(x => x.Upsert<dynamic>(It.IsAny<string>(), "thevalue")).Returns(result.Object);
+            bucket.Setup(x => x.DefaultCollection()).Returns(collection.Object);
 
             var provider = new CouchbaseOutputCacheProvider(bucket.Object) {ThrowOnError = true};
             Assert.Throws<CouchbaseOutputCacheException>(() => provider.Set("thekey", "thevalue", DateTime.MaxValue));
@@ -145,18 +144,12 @@ namespace Couchbase.AspNet.UnitTests
         [InlineData(false)]
         public void Add_When_Operation_Fails_Throw_CouchbaseCacheException(bool throwOnError)
         {
-            var result = new Mock<IOperationResult<dynamic>>();
-            result.Setup(x => x.Success).Returns(false);
-            result.Setup(x => x.Status).Returns(ResponseStatus.OutOfMemory);
-
-            var get = new Mock<IOperationResult<dynamic>>();
-            result.Setup(x => x.Success).Returns(false);
-            result.Setup(x => x.Status).Returns(ResponseStatus.KeyNotFound);
+            var collection = new Mock<ICouchbaseCollection>();
+            collection.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<GetOptions>())).Throws(new DocumentNotFoundException());
+            collection.Setup(x => x.InsertAsync<dynamic>(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<InsertOptions>())).Throws(new OutOfMemoryException());
 
             var bucket = new Mock<IBucket>();
-            bucket.Setup(x => x.Get<dynamic>(It.IsAny<string>())).Returns(get.Object);
-            bucket.Setup(x => x.Insert<dynamic>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan>()))
-                .Returns(result.Object);
+            bucket.Setup(x => x.DefaultCollection()).Returns(collection.Object);
 
             var provider = new CouchbaseOutputCacheProvider(bucket.Object) {ThrowOnError = throwOnError};
 
@@ -175,21 +168,17 @@ namespace Couchbase.AspNet.UnitTests
         [InlineData(false)]
         public void Add_When_Key_DoesNotExst_Inserts_Value(bool throwOnError)
         {
-            var get = new Mock<IOperationResult<dynamic>>();
-            get.Setup(x => x.OpCode).Returns(OperationCode.Get);
-            get.Setup(x => x.Success).Returns(false);
-            get.Setup(x => x.Status).Returns(ResponseStatus.KeyNotFound);
+            var result = new Mock<IGetResult>();
+            result.Setup(x => x.ContentAs<dynamic>()).Returns("value").Verifiable();
+            var mutation = new Mock<IMutationResult>();
+            mutation.Setup(x => x.Cas).Returns(1);
 
-            var insert = new Mock<IOperationResult<dynamic>>();
-            insert.Setup(x => x.OpCode).Returns(OperationCode.Add);
-            insert.Setup(x => x.Success).Returns(true);
-            insert.Setup(x => x.Status).Returns(ResponseStatus.Success);
-            insert.Setup(x => x.Value).Returns("value");
+            var collection = new Mock<ICouchbaseCollection>();
+            collection.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<GetOptions>())).Throws(new DocumentNotFoundException()).Verifiable();
+            collection.Setup(x => x.InsertAsync<dynamic>(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<InsertOptions>())).Returns(Task.FromResult(mutation.Object));
 
             var bucket = new Mock<IBucket>();
-            bucket.Setup(x => x.Get<dynamic>(It.IsAny<string>())).Returns(get.Object).Verifiable();
-            bucket.Setup(x => x.Insert<dynamic>(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan>()))
-                .Returns(insert.Object).Verifiable();
+            bucket.Setup(x => x.DefaultCollection()).Returns(collection.Object).Verifiable();
 
             var provider = new CouchbaseOutputCacheProvider(bucket.Object) {ThrowOnError = throwOnError};
             var val = provider.Add("key", "value", DateTime.MaxValue);
@@ -202,14 +191,15 @@ namespace Couchbase.AspNet.UnitTests
         [InlineData(false)]
         public void Add_When_Key_Exists_Gets_Value(bool throwOnError)
         {
-            var get = new Mock<IOperationResult<dynamic>>();
-            get.Setup(x => x.OpCode).Returns(OperationCode.Get);
-            get.Setup(x => x.Success).Returns(true);
-            get.Setup(x => x.Status).Returns(ResponseStatus.Success);
-            get.Setup(x => x.Value).Returns("value");
+            var get = new Mock<IGetResult>();
+            get.Setup(x => x.Cas).Returns(1);
+            get.Setup(x => x.ContentAs<byte[]>()).Returns(Couchbase.AspNet.Utils.BucketExtensions.Serialize("value"));
+
+            var collection = new Mock<ICouchbaseCollection>();
+            collection.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<GetOptions>())).Returns(Task.FromResult(get.Object));
 
             var bucket = new Mock<IBucket>();
-            bucket.Setup(x => x.Get<dynamic>(It.IsAny<string>())).Returns(get.Object).Verifiable();
+            bucket.Setup(x => x.DefaultCollection()).Returns(collection.Object).Verifiable();
 
             var provider = new CouchbaseOutputCacheProvider(bucket.Object) {ThrowOnError = throwOnError};
             var val = provider.Add("key", "value", DateTime.MaxValue);
@@ -226,12 +216,11 @@ namespace Couchbase.AspNet.UnitTests
         [InlineData(false)]
         public void Remove_When_Operation_Fails_Throw_CouchbaseCacheException(bool throwOnError)
         {
-            var result = new Mock<IOperationResult<dynamic>>();
-            result.Setup(x => x.Success).Returns(false);
-            result.Setup(x => x.Status).Returns(ResponseStatus.KeyNotFound);
+            var collection = new Mock<ICouchbaseCollection>();
+            collection.Setup(x => x.RemoveAsync(It.IsAny<string>(), It.IsAny<RemoveOptions>())).Throws<DocumentNotFoundException>();
 
             var bucket = new Mock<IBucket>();
-            bucket.Setup(x => x.Remove(It.IsAny<string>())).Returns(result.Object);
+            bucket.Setup(x => x.DefaultCollection()).Returns(collection.Object).Verifiable();
 
             var provider = new CouchbaseOutputCacheProvider(bucket.Object) {ThrowOnError = throwOnError};
 

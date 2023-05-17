@@ -3,10 +3,8 @@ using System.Collections.Concurrent;
 using System.Collections.Specialized;
 using System.Configuration;
 using System.Linq;
-using Couchbase.Authentication;
-using Couchbase.Configuration.Client;
-using Couchbase.Core;
-using Couchbase.Core.Transcoders;
+using Couchbase.AspNet.Configuration.Client;
+using Couchbase.Core.IO.Transcoders;
 
 namespace Couchbase.AspNet
 {
@@ -16,37 +14,38 @@ namespace Couchbase.AspNet
         private static readonly ConcurrentDictionary<string, IBucket> Buckets = new ConcurrentDictionary<string, IBucket>();
         private static readonly object LockObj = new object();
 
-        private static void ValidateTranscoder(ICluster cluster)
-        {
-            var transcoder = cluster.Configuration.Transcoder();
-            if (transcoder.GetType() != typeof(BinaryTranscoder))
-            {
-                var message = "The transcoder that cluster is configured with is a `{0}`; " +
-                    "ASP.NET only supports binary objects. Please use configure a `{1}` using ClientConfiguration.Transcoder.";
+        //private static void ValidateTranscoder(ICluster cluster)
+        //{
+        //    var transcoder = cluster.Configuration.Transcoder();
+        //    if (transcoder.GetType() != typeof(BinaryTranscoder))
+        //    {
+        //        var message = "The transcoder that cluster is configured with is a `{0}`; " +
+        //            "ASP.NET only supports binary objects. Please use configure a `{1}` using ClientConfiguration.Transcoder.";
 
-                throw new NotSupportedException(string.Format(message, transcoder.GetType(), typeof(BinaryTranscoder)));
-            }
-        }
+        //        throw new NotSupportedException(string.Format(message, transcoder.GetType(), typeof(BinaryTranscoder)));
+        //    }
+        //}
 
         public static void AddCluster(ICluster cluster, string name)
         {
-            ValidateTranscoder(cluster);
+            //ValidateTranscoder(cluster);
             // ReSharper disable once InconsistentlySynchronizedField
             Clusters.TryAdd(name, cluster);
         }
 
-        public static void Configure(ClientConfiguration config, string name, IAuthenticator authenticator = null)
+        public static void Configure(ClientConfiguration config, string name/*, IAuthenticator authenticator = null*/)
         {
             lock (LockObj)
             {
                 //override any Transcoders with the BinaryTranscoder - its required by ASP.NET
                 //to cast from the stored object to internal 'System.Web.Caching.CachedRawResponse' object
-                config.Transcoder = () => new BinaryTranscoder();
-                var cluster = new Cluster(config);
-                if (authenticator != null)
-                {
-                    cluster.Authenticate(authenticator);
-                }
+                config.Transcoder = () => new LegacyTranscoder();
+                //var cluster = new Cluster(config);
+                var cluster = Cluster.ConnectAsync(config.ToClusterOptions()).GetAwaiter().GetResult();
+                //if (authenticator != null)
+                //{
+                //    cluster.Authenticate(authenticator);
+                //}
 
                 AddCluster(cluster, name);
             }
@@ -59,52 +58,30 @@ namespace Couchbase.AspNet
                 //override any Transcoders with the BinaryTranscoder - its required by ASP.NET
                 //to cast from the stored object to internal 'System.Web.Caching.CachedRawResponse' object
                 var section = (ICouchbaseClientDefinition)ConfigurationManager.GetSection(name);
-                var clientConfig = new ClientConfiguration(section) {Transcoder = () => new BinaryTranscoder()};
-                var cluster = new Cluster(clientConfig);
+                var clientConfig = new ClientConfiguration(section) {Transcoder = () => new LegacyTranscoder()};
+                //var cluster = new Cluster(clientConfig);
+                var cluster = Cluster.ConnectAsync(clientConfig.ToClusterOptions()).GetAwaiter().GetResult();
 
-                //assume if username was provided were using RBAC and >= CB 5.0
-                if (!string.IsNullOrWhiteSpace(section.Username))
-                {
-                    cluster.Authenticate(section.Username, section.Password);
-                }
-                else
-                {
-                    //if pre-5.0 require the use of the password at the BucketDefinition level first
-                    var bucketDefinition = section.Buckets.FirstOrDefault();
-                    if (bucketDefinition != null)
-                    {
-                        var password = bucketDefinition.Password ?? section.Password;
-                        if (!string.IsNullOrWhiteSpace(password))
-                        {
-                            cluster.Authenticate(new ClassicAuthenticator(bucketDefinition.Name, password));
-                        }
-                    }
-                }
+                ////assume if username was provided were using RBAC and >= CB 5.0
+                //if (!string.IsNullOrWhiteSpace(section.Username))
+                //{
+                //    cluster.Authenticate(section.Username, section.Password);
+                //}
+                //else
+                //{
+                //    //if pre-5.0 require the use of the password at the BucketDefinition level first
+                //    var bucketDefinition = section.Buckets.FirstOrDefault();
+                //    if (bucketDefinition != null)
+                //    {
+                //        var password = bucketDefinition.Password ?? section.Password;
+                //        if (!string.IsNullOrWhiteSpace(password))
+                //        {
+                //            cluster.Authenticate(new ClassicAuthenticator(bucketDefinition.Name, password));
+                //        }
+                //    }
+                //}
 
                 AddCluster(cluster, name);
-            }
-        }
-
-        public static IBucket GetBucket(string clusterName, string bucketName, string password)
-        {
-            lock (LockObj)
-            {
-                var bucketAlias = clusterName + bucketName;
-                if (Buckets.TryGetValue(bucketAlias, out var bucket))
-                {
-                    return bucket;
-                }
-
-                if (Clusters.TryGetValue(clusterName, out var cluster))
-                {
-                    bucket = password == null ?
-                        cluster.OpenBucket(bucketName) :
-                        cluster.OpenBucket(bucketName, password);
-
-                    Buckets.TryAdd(bucketAlias, bucket);
-                }
-
-                return bucket;
             }
         }
 
@@ -120,7 +97,7 @@ namespace Couchbase.AspNet
 
                 if (Clusters.TryGetValue(clusterName, out var cluster))
                 {
-                    bucket = cluster.OpenBucket(bucketName);
+                    bucket = cluster.BucketAsync(bucketName).GetAwaiter().GetResult();
                     Buckets.TryAdd(bucketAlias, bucket);
                 }
 

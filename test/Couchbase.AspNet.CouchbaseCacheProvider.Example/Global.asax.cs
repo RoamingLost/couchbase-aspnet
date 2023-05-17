@@ -5,8 +5,8 @@ using System.Web;
 using System.Web.Mvc;
 using System.Web.Optimization;
 using System.Web.Routing;
-using Couchbase.Authentication;
-using Couchbase.Configuration.Client;
+using Couchbase.AspNet.Authentication;
+using Couchbase.AspNet.Configuration.Client;
 
 namespace Couchbase.AspNet.CouchbaseCacheProvider.Example
 {
