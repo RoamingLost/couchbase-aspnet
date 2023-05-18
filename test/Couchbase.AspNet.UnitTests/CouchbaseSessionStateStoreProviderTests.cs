@@ -1,11 +1,17 @@
 ﻿
 using System;
 using System.Web;
+using Couchbase.AspNet.IO;
 using Couchbase.AspNet.Session;
+using Couchbase.AspNet.Utils;
 using Couchbase.Core;
-using Couchbase.IO;
+using Couchbase.Core.IO.Transcoders;
+using Couchbase.KeyValue;
 using Moq;
 using Xunit;
+using Couchbase.Core.Exceptions.KeyValue;
+using Couchbase.Core.Exceptions;
+using System.Threading.Tasks;
 
 namespace Couchbase.AspNet.UnitTests
 {
@@ -14,13 +20,15 @@ namespace Couchbase.AspNet.UnitTests
         [Fact]
         public void CreateUnintilizedItem_ThrownOnError_Is_True_And_Success_Does_Not_Throw()
         {
-            var result = new Mock<IOperationResult<SessionStateItem>>();
-            result.Setup(x => x.Success).Returns(true);
-            result.Setup(x => x.Status).Returns(ResponseStatus.Success);
+            var result = new Mock<IMutationResult>();
+            result.Setup(x => x.Cas).Returns(1);
+
+            var collection = new Mock<ICouchbaseCollection>();
+            collection.Setup(x => x.InsertAsync("testId", It.IsAny<byte[]>(), It.IsAny<InsertOptions>()))
+                .Returns(Task.FromResult(result.Object));
 
             var bucket = new Mock<IBucket>();
-            bucket.Setup(x => x.Insert("testId", It.IsAny<SessionStateItem>(), It.IsAny<TimeSpan>())).
-                Returns(result.Object);
+            bucket.Setup(x => x.DefaultCollection()).Returns(collection.Object).Verifiable();
 
             var provider = new CouchbaseSessionStateProvider {Bucket = bucket.Object, ThrowOnError = true};
             provider.CreateUninitializedItem(HttpContext.Current, "testId", 20);
@@ -31,13 +39,11 @@ namespace Couchbase.AspNet.UnitTests
         [InlineData(false)]
         public void CreateUnintilizedItem_ThrownOnError_Is_True_And_Fail_Throws_CouchbaseSessionStateException(bool thrownOnError)
         {
-            var result = new Mock<IOperationResult<SessionStateItem>>();
-            result.Setup(x => x.Success).Returns(false);
-            result.Setup(x => x.Status).Returns(ResponseStatus.KeyExists);
+            var collection = new Mock<ICouchbaseCollection>();
+            collection.Setup(x => x.InsertAsync("testId", It.IsAny<SessionStateItem>(), It.IsAny<InsertOptions>())).Throws<DocumentExistsException>();
 
             var bucket = new Mock<IBucket>();
-            bucket.Setup(x => x.Insert("testId", It.IsAny<SessionStateItem>(), It.IsAny<TimeSpan>())).
-                Returns(result.Object);
+            bucket.Setup(x => x.DefaultCollection()).Returns(collection.Object).Verifiable();
 
             var provider = new CouchbaseSessionStateProvider { Bucket = bucket.Object, ThrowOnError = thrownOnError };
 

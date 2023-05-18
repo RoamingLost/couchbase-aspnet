@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Configuration;
 using System.Linq;
-using Couchbase.Configuration.Client;
-using Couchbase.Configuration.Client.Providers;
-using Couchbase.Core;
+using Couchbase.AspNet.Configuration.Client;
+using Couchbase.AspNet.Configuration.Client.Providers;
+using Couchbase.AspNet.Utils;
 
 namespace Couchbase.AspNet
 {
@@ -147,11 +147,13 @@ namespace Couchbase.AspNet
             var bucketName = GetAndRemove(config, "bucket", false);
             if (!string.IsNullOrEmpty(bucketName))
             {
-                return cluster.OpenBucket(bucketName);
+                return AsyncHelper.RunSync(() => cluster.BucketAsync(bucketName));
             }
 
             //if no bucket is provide use the default bucket
-            return cluster.OpenBucket();
+            var buckets = AsyncHelper.RunSync(() => cluster.Buckets.GetAllBucketsAsync());
+            var defaultBucketName = buckets.Keys.First();
+            return AsyncHelper.RunSync(() => cluster.BucketAsync(defaultBucketName));
         }
 
         /// <summary>
@@ -164,7 +166,9 @@ namespace Couchbase.AspNet
         {
             var section = (CouchbaseClientSection)ConfigurationManager.GetSection(name);
             var clientConfig = new ClientConfiguration(section);
-            return new Cluster(clientConfig);
+            var cluster = AsyncHelper.RunSync(() => Cluster.ConnectAsync(clientConfig.ToClusterOptions()));
+            AsyncHelper.RunSync(() => cluster.WaitUntilReadyAsync(TimeSpan.FromSeconds(BootStrapper.MaxWaitSeconds)));
+            return cluster;
         }
     }
 }

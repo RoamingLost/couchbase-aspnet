@@ -2,15 +2,16 @@
 using System.Collections.Generic;
 using System.Linq;
 using Common.Logging;
-using Couchbase.AspNet.Caching;
-using Couchbase.Authentication;
-using Couchbase.Configuration.Client;
+using Couchbase.AspNet.Authentication;
+using Couchbase.AspNet.Configuration.Client;
 
 namespace Couchbase.AspNet
 {
     internal class BootStrapper
     {
         private readonly ILog _log = LogManager.GetLogger<BootStrapper>();
+
+        public const int MaxWaitSeconds = 10;
 
         public void Bootstrap(string name, System.Collections.Specialized.NameValueCollection config, ICouchbaseWebProvider provider)
         {
@@ -88,24 +89,25 @@ namespace Couchbase.AspNet
                 }
             };
 
-            IAuthenticator authenticator = null;
             if (string.IsNullOrWhiteSpace(username))
             {
                 if (!string.IsNullOrWhiteSpace(password))
                 {
                     //assume pre-RBAC or CB < 5.0 if username is empty
-                    authenticator = new ClassicAuthenticator(provider.BucketName, password);
+                    //authenticator = new ClassicAuthenticator(provider.BucketName, password);
+                    throw new NotImplementedException("ClassicAuthenticator Not Supported");
                 }
             }
             else
             {
                 if (!string.IsNullOrWhiteSpace(password))
                 {
-                    authenticator = new PasswordAuthenticator(username, password);
+                    var authenticator = new PasswordAuthenticator(username, password);
+                    clientConfig.SetAuthenticator(authenticator);
                 }
             }
 
-            MultiCluster.Configure(clientConfig, name, authenticator);
+            MultiCluster.Configure(clientConfig, name/*, authenticator*/);
 
             _log.Debug("Creating bucket: " + provider.BucketName);
             provider.Bucket = MultiCluster.GetBucket(name, provider.BucketName);

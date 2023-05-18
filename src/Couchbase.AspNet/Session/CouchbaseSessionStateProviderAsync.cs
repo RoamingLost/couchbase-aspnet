@@ -1,5 +1,4 @@
-﻿#if NET462
-using System;
+﻿using System;
 using System.Collections.Specialized;
 using System.IO;
 using System.Threading;
@@ -8,8 +7,9 @@ using System.Web;
 using System.Web.Configuration;
 using System.Web.SessionState;
 using Common.Logging;
-using Couchbase.Core;
-using Couchbase.IO;
+using Couchbase.AspNet.IO;
+using Couchbase.AspNet.Utils;
+using Couchbase.Core.IO.Transcoders;
 using Microsoft.AspNet.SessionState;
 
 namespace Couchbase.AspNet.Session
@@ -24,6 +24,8 @@ namespace Couchbase.AspNet.Session
         public string BucketName { get; set; }
         internal ILog Log => LogManager.GetLogger<CouchbaseSessionStateProvider>();
         private SessionStateSection Config { get; set; }
+
+        private readonly ITypeTranscoder _transcoder = new LegacyTranscoder();
 
         public override void Initialize(string name, NameValueCollection config)
         {
@@ -62,7 +64,7 @@ namespace Couchbase.AspNet.Session
                     SessionId = sessionId,
                     Actions = SessionStateActions.InitializeItem,
                     Timeout = sessionTimeout
-                }, sessionTimeout).ConfigureAwait(false);
+                }, sessionTimeout, _transcoder).ConfigureAwait(false);
 
                 if (result.Success) return;
                 LogAndOrThrow(result, sessionId);
@@ -100,7 +102,7 @@ namespace Couchbase.AspNet.Session
 
             Log.TraceFormat("GetItemFromStoreAsync called for item {0}.", sessionId);
 
-            var get = await Bucket.GetAsync<SessionStateItem>(sessionId).ConfigureAwait(false);
+            var get = await Bucket.GetAsync<SessionStateItem>(sessionId, _transcoder).ConfigureAwait(false);
             if (get.Status == ResponseStatus.KeyNotFound)
             {
                 return null;
@@ -130,7 +132,7 @@ namespace Couchbase.AspNet.Session
                 if (exclusive)
                 {
                     item.Locked = true;
-                    var upsert = await Bucket.UpsertAsync(sessionId, item, item.Timeout).ConfigureAwait(false);
+                    var upsert = await Bucket.UpsertAsync(sessionId, item, item.Timeout, _transcoder).ConfigureAwait(false);
                     if (!upsert.Success)
                     {
                         LogAndOrThrow(upsert, sessionId);
@@ -149,7 +151,7 @@ namespace Couchbase.AspNet.Session
         {
             var sessionId = this.PrefixIdentifier(id);
             Log.TraceFormat("ReleaseItemExclusiveAsync called for item {0} with lockid {1}.", sessionId, lockId);
-            var get = await Bucket.GetAsync<SessionStateItem>(sessionId).ConfigureAwait(false);
+            var get = await Bucket.GetAsync<SessionStateItem>(sessionId, _transcoder).ConfigureAwait(false);
             var item = get.Value;
 
 
@@ -158,7 +160,7 @@ namespace Couchbase.AspNet.Session
                 item.Locked = false;
                 item.LockId = 0;
 
-                var upsert = await Bucket.UpsertAsync(sessionId, item, item.Timeout).ConfigureAwait(false);
+                var upsert = await Bucket.UpsertAsync(sessionId, item, item.Timeout, _transcoder).ConfigureAwait(false);
                 if (!upsert.Success)
                 {
                     LogAndOrThrow(upsert, sessionId);
@@ -205,7 +207,7 @@ namespace Couchbase.AspNet.Session
                     Actions = SessionStateActions.None,
                     LockId = (uint?) lockId ?? 0,
                     SessionItems = Serialize(item.Items)
-                }, Config.Timeout).ConfigureAwait(false);
+                }, Config.Timeout, _transcoder).ConfigureAwait(false);
 
                 if (!insert.Success)
                 {
@@ -219,7 +221,7 @@ namespace Couchbase.AspNet.Session
                     LockId = (uint?)lockId ?? 0,
                     Actions = SessionStateActions.None,
                     SessionItems = Serialize(item.Items)
-                }).ConfigureAwait(false);
+                }, Config.Timeout, _transcoder).ConfigureAwait(false);
                 if (!upsert.Success)
                 {
                     LogAndOrThrow(upsert, sessionId);
@@ -300,27 +302,6 @@ namespace Couchbase.AspNet.Session
             }
         }
 
-        /// <summary>
-        /// Logs the reason why an operation fails and throws and exception if <see cref="ThrowOnError"/> is
-        /// <c>true</c> and logging the issue as WARN.
-        /// </summary>
-        /// <param name="result">The result.</param>
-        /// <param name="key">The key.</param>
-        /// <exception cref="InvalidOperationException"></exception>
-        private void LogAndOrThrow(IDocumentResult result, string key)
-        {
-            if (result.Exception != null)
-            {
-                LogAndOrThrow(result.Exception, key);
-                return;
-            }
-            Log.Error($"Could not retrieve, remove or write key '{key}' - reason: {result.Status}");
-            if (ThrowOnError)
-            {
-                throw new InvalidOperationException(result.Status.ToString());
-            }
-        }
-
         #endregion
     }
 }
@@ -345,4 +326,3 @@ namespace Couchbase.AspNet.Session
  *
  * ************************************************************/
 #endregion
-#endif
