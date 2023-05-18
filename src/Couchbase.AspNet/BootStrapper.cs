@@ -11,6 +11,8 @@ namespace Couchbase.AspNet
     {
         private readonly ILog _log = LogManager.GetLogger<BootStrapper>();
 
+        public const int MaxWaitSeconds = 10;
+
         public void Bootstrap(string name, System.Collections.Specialized.NameValueCollection config, ICouchbaseWebProvider provider)
         {
             var prefix = ProviderHelper.GetAndRemove(config, "prefix", false);

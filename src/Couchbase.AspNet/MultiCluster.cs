@@ -4,6 +4,7 @@ using System.Collections.Specialized;
 using System.Configuration;
 using System.Linq;
 using Couchbase.AspNet.Configuration.Client;
+using Couchbase.AspNet.Utils;
 using Couchbase.Core.IO.Transcoders;
 
 namespace Couchbase.AspNet
@@ -41,7 +42,8 @@ namespace Couchbase.AspNet
                 //to cast from the stored object to internal 'System.Web.Caching.CachedRawResponse' object
                 config.Transcoder = () => new LegacyTranscoder();
                 //var cluster = new Cluster(config);
-                var cluster = Cluster.ConnectAsync(config.ToClusterOptions()).GetAwaiter().GetResult();
+                var cluster = AsyncHelper.RunSync(() => Cluster.ConnectAsync(config.ToClusterOptions()));
+                AsyncHelper.RunSync(() => cluster.WaitUntilReadyAsync(TimeSpan.FromSeconds(BootStrapper.MaxWaitSeconds)));
                 //if (authenticator != null)
                 //{
                 //    cluster.Authenticate(authenticator);
@@ -60,7 +62,8 @@ namespace Couchbase.AspNet
                 var section = (ICouchbaseClientDefinition)ConfigurationManager.GetSection(name);
                 var clientConfig = new ClientConfiguration(section) {Transcoder = () => new LegacyTranscoder()};
                 //var cluster = new Cluster(clientConfig);
-                var cluster = Cluster.ConnectAsync(clientConfig.ToClusterOptions()).GetAwaiter().GetResult();
+                var cluster = AsyncHelper.RunSync(() => Cluster.ConnectAsync(clientConfig.ToClusterOptions()));
+                AsyncHelper.RunSync(() => cluster.WaitUntilReadyAsync(TimeSpan.FromSeconds(BootStrapper.MaxWaitSeconds)));
 
                 ////assume if username was provided were using RBAC and >= CB 5.0
                 //if (!string.IsNullOrWhiteSpace(section.Username))
@@ -97,7 +100,7 @@ namespace Couchbase.AspNet
 
                 if (Clusters.TryGetValue(clusterName, out var cluster))
                 {
-                    bucket = cluster.BucketAsync(bucketName).GetAwaiter().GetResult();
+                    bucket = AsyncHelper.RunSync(() => cluster.BucketAsync(bucketName));
                     Buckets.TryAdd(bucketAlias, bucket);
                 }
 

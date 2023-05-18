@@ -5,6 +5,7 @@ using System.Configuration;
 using System.Linq;
 using Couchbase.AspNet.Configuration.Client;
 using Couchbase.AspNet.Configuration.Client.Providers;
+using Couchbase.AspNet.Utils;
 
 namespace Couchbase.AspNet
 {
@@ -146,13 +147,13 @@ namespace Couchbase.AspNet
             var bucketName = GetAndRemove(config, "bucket", false);
             if (!string.IsNullOrEmpty(bucketName))
             {
-                return cluster.BucketAsync(bucketName).GetAwaiter().GetResult();
+                return AsyncHelper.RunSync(() => cluster.BucketAsync(bucketName));
             }
 
             //if no bucket is provide use the default bucket
-            var buckets = cluster.Buckets.GetAllBucketsAsync().GetAwaiter().GetResult();
+            var buckets = AsyncHelper.RunSync(() => cluster.Buckets.GetAllBucketsAsync());
             var defaultBucketName = buckets.Keys.First();
-            return cluster.BucketAsync(defaultBucketName).GetAwaiter().GetResult();
+            return AsyncHelper.RunSync(() => cluster.BucketAsync(defaultBucketName));
         }
 
         /// <summary>
@@ -165,7 +166,9 @@ namespace Couchbase.AspNet
         {
             var section = (CouchbaseClientSection)ConfigurationManager.GetSection(name);
             var clientConfig = new ClientConfiguration(section);
-            return Cluster.ConnectAsync(clientConfig.ToClusterOptions()).GetAwaiter().GetResult();
+            var cluster = AsyncHelper.RunSync(() => Cluster.ConnectAsync(clientConfig.ToClusterOptions()));
+            AsyncHelper.RunSync(() => cluster.WaitUntilReadyAsync(TimeSpan.FromSeconds(BootStrapper.MaxWaitSeconds)));
+            return cluster;
         }
     }
 }

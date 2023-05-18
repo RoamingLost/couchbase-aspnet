@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading.Tasks;
 using Couchbase.AspNet.IO;
 using Couchbase.Core.Exceptions.KeyValue;
 using Couchbase.Core.IO.Transcoders;
@@ -10,9 +11,14 @@ namespace Couchbase.AspNet.Utils
     {
         public static IOperationResult<T> Get<T>(this IBucket bucket, string key, ITypeTranscoder transcoder) where T : class
         {
+            return AsyncHelper.RunSync(() => GetAsync<T>(bucket, key, transcoder));
+        }
+
+        public static async Task<IOperationResult<T>> GetAsync<T>(this IBucket bucket, string key, ITypeTranscoder transcoder) where T : class
+        {
             try
             {
-                var result = bucket.DefaultCollection().GetAsync(key, new GetOptions().Transcoder(transcoder)).GetAwaiter().GetResult();
+                var result = await bucket.DefaultCollection().GetAsync(key, new GetOptions().Transcoder(transcoder));
                 var bytes = result.ContentAs<byte[]>();
                 var value = SerializationUtil.Deserialize<T>(bytes);
                 return new OperationResult<T>
@@ -51,10 +57,15 @@ namespace Couchbase.AspNet.Utils
 
         public static IOperationResult<T> Insert<T>(this IBucket bucket, string key, T value, TimeSpan timeout, ITypeTranscoder transcoder) where T : class
         {
+            return AsyncHelper.RunSync(() => InsertAsync<T>(bucket, key, value, timeout, transcoder));
+        }
+
+        public static async Task<IOperationResult<T>> InsertAsync<T>(this IBucket bucket, string key, T value, TimeSpan timeout, ITypeTranscoder transcoder) where T : class
+        {
             try
             {
                 var bytes = SerializationUtil.Serialize(value);
-                var result = bucket.DefaultCollection().InsertAsync(key, bytes, new InsertOptions().Transcoder(transcoder).Expiry(timeout)).GetAwaiter().GetResult();
+                var result = await bucket.DefaultCollection().InsertAsync(key, bytes, new InsertOptions().Transcoder(transcoder).Expiry(timeout));
                 return new OperationResult<T>
                 {
                     Id = key,
@@ -80,10 +91,15 @@ namespace Couchbase.AspNet.Utils
 
         public static IOperationResult<T> Upsert<T>(this IBucket bucket, string key, T value, TimeSpan timeout, ITypeTranscoder transcoder) where T : class
         {
+            return AsyncHelper.RunSync(() => UpsertAsync<T>(bucket, key, value, timeout, transcoder));
+        }
+
+        public static async Task<IOperationResult<T>> UpsertAsync<T>(this IBucket bucket, string key, T value, TimeSpan timeout, ITypeTranscoder transcoder) where T : class
+        {
             try
             {
                 var bytes = SerializationUtil.Serialize(value);
-                var result = bucket.DefaultCollection().UpsertAsync(key, bytes, new UpsertOptions().Transcoder(transcoder).Expiry(timeout)).GetAwaiter().GetResult();
+                var result = await bucket.DefaultCollection().UpsertAsync(key, bytes, new UpsertOptions().Transcoder(transcoder).Expiry(timeout));
                 return new OperationResult<T>
                 {
                     Id = key,
@@ -109,9 +125,14 @@ namespace Couchbase.AspNet.Utils
 
         public static IOperationResult Remove(this IBucket bucket, string key)
         {
+            return AsyncHelper.RunSync(() => RemoveAsync(bucket, key));
+        }
+
+        public static async Task<IOperationResult> RemoveAsync(this IBucket bucket, string key)
+        {
             try
             {
-                bucket.DefaultCollection().RemoveAsync(key).GetAwaiter().GetResult();
+                await bucket.DefaultCollection().RemoveAsync(key);
                 return new OperationResult
                 {
                     Id = key,
