@@ -1,13 +1,11 @@
-﻿#if NET462
-
-using System;
+﻿using System;
 using System.Collections.Specialized;
 using System.Threading.Tasks;
 using System.Web.Caching;
 using Common.Logging;
-using Couchbase.Core;
-using Couchbase.IO;
-using Couchbase.Utils;
+using Couchbase.AspNet.IO;
+using Couchbase.AspNet.Utils;
+using Couchbase.Core.IO.Transcoders;
 
 namespace Couchbase.AspNet.Caching
 {
@@ -23,6 +21,8 @@ namespace Couchbase.AspNet.Caching
         public bool ThrowOnError { get; set; }
         public string Prefix { get; set; }
         public string BucketName { get; set; }
+
+        private readonly ITypeTranscoder _transcoder = new LegacyTranscoder();
 
         public CouchbaseOutputCacheProviderAsync() { }
 
@@ -53,7 +53,7 @@ namespace Couchbase.AspNet.Caching
         public override object Get(string key)
         {
             _log.Debug("Cache.Get(" + key + ")");
-            return GetAsync(key).GetAwaiter().GetResult();
+            return AsyncHelper.RunSync(() => GetAsync(key));
         }
 
         /// <summary>
@@ -75,7 +75,9 @@ namespace Couchbase.AspNet.Caching
         public override object Add(string key, object entry, DateTime utcExpiry)
         {
             _log.Debug("Cache.Add(" + key + ", " + entry + ", " + utcExpiry + ")");
-            return AddAsync(key, entry, utcExpiry).GetAwaiter().GetResult();
+            if (utcExpiry == DateTime.MaxValue)
+                utcExpiry = DateTime.Now.ToUniversalTime().AddMinutes(60);
+            return AsyncHelper.RunSync(() => AddAsync(key, entry, utcExpiry));
         }
 
         /// <summary>
@@ -89,7 +91,9 @@ namespace Couchbase.AspNet.Caching
         public override void Set(string key, object entry, DateTime utcExpiry)
         {
             _log.Debug("Cache.Set(" + key + ", " + entry + ", " + utcExpiry + ")");
-            SetAsync(key, entry, utcExpiry).GetAwaiter().GetResult();
+            if (utcExpiry == DateTime.MaxValue)
+                utcExpiry = DateTime.Now.ToUniversalTime().AddMinutes(60);
+            AsyncHelper.RunSync(() => SetAsync(key, entry, utcExpiry));
         }
 
         /// <summary>
@@ -98,7 +102,7 @@ namespace Couchbase.AspNet.Caching
         /// <param name="key">The unique identifier for the entry to remove from the output cache.</param>
         public override void Remove(string key)
         {
-            RemoveAsync(key).GetAwaiter().GetResult();
+            AsyncHelper.RunSync(() => RemoveAsync(key));
         }
 
         /// <summary>
@@ -118,7 +122,7 @@ namespace Couchbase.AspNet.Caching
             try
             {
                 // get the item
-                var result = await Bucket.GetAsync<dynamic>(key).ContinueOnAnyContext();
+                var result = await Bucket.GetAsync<dynamic>(key, _transcoder).ContinueOnAnyContext();
                 if (result.Success)
                 {
                     return result.Value;
@@ -157,10 +161,13 @@ namespace Couchbase.AspNet.Caching
             _log.Debug("Cache.AddAsync(" + key + ", " + entry + ", " + utcExpiry + ")");
             CheckKey(ref key);
 
+            if (utcExpiry == DateTime.MaxValue)
+                utcExpiry = DateTime.Now.ToUniversalTime().AddMinutes(60);
+
             try
             {
                 //return the value if the key exists
-                var exists = await Bucket.GetAsync<object>(key).ContinueOnAnyContext();
+                var exists = await Bucket.GetAsync<object>(key, _transcoder).ContinueOnAnyContext();
                 if (exists.Success)
                 {
                     return exists.Value;
@@ -169,7 +176,7 @@ namespace Couchbase.AspNet.Caching
                 var expiration = utcExpiry - DateTime.Now.ToUniversalTime();
 
                 //no key so add the value and return it.
-                var result = await Bucket.InsertAsync(key, entry, expiration).ContinueOnAnyContext();
+                var result = await Bucket.InsertAsync(key, entry, expiration, _transcoder).ContinueOnAnyContext();
                 if (result.Success)
                 {
                     return entry;
@@ -196,11 +203,14 @@ namespace Couchbase.AspNet.Caching
             _log.Debug("Cache.SetAsync(" + key + ", " + entry + ", " + utcExpiry + ")");
             CheckKey(ref key);
 
+            if (utcExpiry == DateTime.MaxValue)
+                utcExpiry = DateTime.Now.ToUniversalTime().AddMinutes(60);
+
             try
             {
                 var expiration = utcExpiry - DateTime.Now.ToUniversalTime();
 
-                var result = await Bucket.UpsertAsync(key, entry, expiration).ContinueOnAnyContext();
+                var result = await Bucket.UpsertAsync(key, entry, expiration, _transcoder).ContinueOnAnyContext();
                 if (result.Success) return;
                 LogAndOrThrow(result, key);
             }
@@ -308,4 +318,3 @@ namespace Couchbase.AspNet.Caching
  *
  * ************************************************************/
 #endregion
-#endif
