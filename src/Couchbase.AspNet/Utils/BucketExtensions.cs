@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Threading.Tasks;
 using Couchbase.AspNet.IO;
+using Couchbase.Core.Exceptions;
 using Couchbase.Core.Exceptions.KeyValue;
 using Couchbase.Core.IO.Transcoders;
 using Couchbase.KeyValue;
@@ -21,37 +22,11 @@ namespace Couchbase.AspNet.Utils
                 var result = await bucket.DefaultCollection().GetAsync(key, new GetOptions().Transcoder(transcoder));
                 var bytes = result.ContentAs<byte[]>();
                 var value = SerializationUtil.Deserialize<T>(bytes);
-                return new OperationResult<T>
-                {
-                    Id = key,
-                    Success = true,
-                    Status = ResponseStatus.Success,
-                    Message = ResponseStatus.Success.ToString(),
-                    Cas = result.Cas,
-                    Value = value,
-                };
-            }
-            catch (DocumentNotFoundException notFoundEx)
-            {
-                return new OperationResult<T>
-                {
-                    Id = key,
-                    Success = false,
-                    Status = ResponseStatus.KeyNotFound,
-                    Message = ResponseStatus.KeyNotFound.ToString(),
-                    Exception = notFoundEx
-                };
+                return Success<T>(key, result.Cas, value);
             }
             catch (Exception ex)
             {
-                return new OperationResult<T>
-                {
-                    Id = key,
-                    Success = false,
-                    Status = ResponseStatus.ClientFailure,
-                    Message = ex.Message,
-                    Exception = ex
-                };
+                return Error<T>(key, ex);
             }
         }
 
@@ -66,26 +41,11 @@ namespace Couchbase.AspNet.Utils
             {
                 var bytes = SerializationUtil.Serialize(value);
                 var result = await bucket.DefaultCollection().InsertAsync(key, bytes, new InsertOptions().Transcoder(transcoder).Expiry(timeout));
-                return new OperationResult<T>
-                {
-                    Id = key,
-                    Success = true,
-                    Status = ResponseStatus.Success,
-                    Message = ResponseStatus.Success.ToString(),
-                    Cas = result.Cas,
-                    Value = value
-                };
+                return Success<T>(key, result.Cas, value);
             }
             catch (Exception ex)
             {
-                return new OperationResult<T>
-                {
-                    Id = key,
-                    Success = false,
-                    Status = ResponseStatus.UnknownError,
-                    Message = ex.Message,
-                    Exception = ex
-                };
+                return Error<T>(key, ex);
             }
         }
 
@@ -100,26 +60,11 @@ namespace Couchbase.AspNet.Utils
             {
                 var bytes = SerializationUtil.Serialize(value);
                 var result = await bucket.DefaultCollection().UpsertAsync(key, bytes, new UpsertOptions().Transcoder(transcoder).Expiry(timeout));
-                return new OperationResult<T>
-                {
-                    Id = key,
-                    Success = true,
-                    Status = ResponseStatus.Success,
-                    Message = ResponseStatus.Success.ToString(),
-                    Cas = result.Cas,
-                    Value = value
-                };
+                return Success<T>(key, result.Cas, value);
             }
             catch (Exception ex)
             {
-                return new OperationResult<T>
-                {
-                    Id = key,
-                    Success = false,
-                    Status = ResponseStatus.UnknownError,
-                    Message = ex.Message,
-                    Exception = ex
-                };
+                return Error<T>(key, ex);
             }
         }
 
@@ -133,24 +78,11 @@ namespace Couchbase.AspNet.Utils
             try
             {
                 await bucket.DefaultCollection().RemoveAsync(key);
-                return new OperationResult
-                {
-                    Id = key,
-                    Success = true,
-                    Status = ResponseStatus.Success,
-                    Message = ResponseStatus.Success.ToString()
-                };
+                return Success(key);
             }
             catch (Exception ex)
             {
-                return new OperationResult
-                {
-                    Id = key,
-                    Success = false,
-                    Status = ResponseStatus.UnknownError,
-                    Message = ex.Message,
-                    Exception = ex
-                };
+                return Error(key, ex);
             }
         }
 
@@ -164,24 +96,79 @@ namespace Couchbase.AspNet.Utils
             try
             {
                 await bucket.DefaultCollection().TouchAsync(key, timeout);
-                return new OperationResult
-                {
-                    Id = key,
-                    Success = true,
-                    Status = ResponseStatus.Success,
-                    Message = ResponseStatus.Success.ToString()
-                };
+                return Success(key);
             }
             catch (Exception ex)
             {
-                return new OperationResult
-                {
-                    Id = key,
-                    Success = false,
-                    Status = ResponseStatus.UnknownError,
-                    Message = ex.Message,
-                    Exception = ex
-                };
+                return Error(key, ex);
+            }
+        }
+
+        private static OperationResult<T> Success<T>(string key, ulong cas, T value)
+        {
+            return new OperationResult<T>()
+            {
+                Id = key,
+                Cas = cas,
+                Success = true,
+                Status = ResponseStatus.Success,
+                Message = ResponseStatus.Success.ToString(),
+                Value = value
+            };
+        }
+
+        private static OperationResult Success(string key)
+        {
+            return new OperationResult
+            {
+                Id = key,
+                Success = true,
+                Status = ResponseStatus.Success,
+                Message = ResponseStatus.Success.ToString()
+            };
+        }
+
+        private static OperationResult<T> Error<T>(string key, Exception exception)
+        {
+            return new OperationResult<T>
+            {
+                Id = key,
+                Success = false,
+                Status = GetResonseStatus(exception),
+                Message = exception.Message,
+                Exception = exception
+            };
+        }
+
+        private static OperationResult Error(string key, Exception exception)
+        {
+            return new OperationResult
+            {
+                Id = key,
+                Success = false,
+                Status = GetResonseStatus(exception),
+                Message = exception.Message,
+                Exception = exception
+            };
+        }
+
+        private static ResponseStatus GetResonseStatus(Exception exception)
+        {
+            switch (exception)
+            {
+                case DocumentNotFoundException notFound:
+                    return ResponseStatus.KeyNotFound;
+                case DocumentExistsException exists:
+                    return ResponseStatus.KeyExists;
+                case OutOfMemoryException outOfMemory:
+                case ServerOutOfMemoryException serverMemory:
+                    return ResponseStatus.OutOfMemory;
+                case InternalServerFailureException internalServer:
+                    return ResponseStatus.InternalError;
+                case Couchbase.Core.Exceptions.TimeoutException timeout:
+                    return ResponseStatus.OperationTimeout;
+                default:
+                    return ResponseStatus.UnknownError;
             }
         }
     }

@@ -193,7 +193,7 @@ namespace Couchbase.AspNet.UnitTests
         {
             var get = new Mock<IGetResult>();
             get.Setup(x => x.Cas).Returns(1);
-            get.Setup(x => x.ContentAs<byte[]>()).Returns(Couchbase.AspNet.Utils.BucketExtensions.Serialize("value"));
+            get.Setup(x => x.ContentAs<byte[]>()).Returns(SerializationUtil.Serialize("value"));
 
             var collection = new Mock<ICouchbaseCollection>();
             collection.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<GetOptions>())).Returns(Task.FromResult(get.Object));
