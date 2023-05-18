@@ -27,6 +27,7 @@
     <PackageReference Include="CouchbaseNetClient" Version="3.4.6" />
     <PackageReference Include="Common.Logging" Version="3.4.1" />
     <PackageReference Include="Common.Logging.Core" Version="3.4.1" />
+    <PackageReference Include="Microsoft.AspNet.SessionState.SessionStateModule" Version="1.1.0" />
     <PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
 </ItemGroup>
 
