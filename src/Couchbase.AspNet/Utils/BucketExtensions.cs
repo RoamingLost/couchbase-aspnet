@@ -153,5 +153,36 @@ namespace Couchbase.AspNet.Utils
                 };
             }
         }
+
+        public static IOperationResult Touch(this IBucket bucket, string key, TimeSpan timeout)
+        {
+            return AsyncHelper.RunSync(() => TouchAsync(bucket, key, timeout));
+        }
+
+        public static async Task<IOperationResult> TouchAsync(this IBucket bucket, string key, TimeSpan timeout)
+        {
+            try
+            {
+                await bucket.DefaultCollection().TouchAsync(key, timeout);
+                return new OperationResult
+                {
+                    Id = key,
+                    Success = true,
+                    Status = ResponseStatus.Success,
+                    Message = ResponseStatus.Success.ToString()
+                };
+            }
+            catch (Exception ex)
+            {
+                return new OperationResult
+                {
+                    Id = key,
+                    Success = false,
+                    Status = ResponseStatus.UnknownError,
+                    Message = ex.Message,
+                    Exception = ex
+                };
+            }
+        }
     }
 }
